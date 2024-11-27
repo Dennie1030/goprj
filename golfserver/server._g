@@ -1,0 +1,180 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"sync"
+)
+
+// 数据结构
+type Data struct {
+	DataName  string `json:"dataName"`
+	DataValue string `json:"dataValue"`
+}
+
+var (
+	dataStore = make(map[string]string) // 数据存储
+	mutex     = sync.RWMutex{}          // 读写锁保护
+	dataFile  = "data.json"             // 数据保存的文件名
+)
+
+// 保存数据到本地文件
+func saveDataToFile() error {
+	mutex.RLock()
+	defer mutex.RUnlock()
+
+	file, err := os.Create(dataFile)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	return encoder.Encode(dataStore)
+}
+
+// 从本地文件加载数据
+func loadDataFromFile() error {
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	file, err := os.Open(dataFile)
+	if os.IsNotExist(err) {
+		// 如果文件不存在，则初始化为空
+		dataStore = make(map[string]string)
+		return nil
+	} else if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	return decoder.Decode(&dataStore)
+}
+
+// 上传数据
+func uploadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var newData Data
+	if err := json.NewDecoder(r.Body).Decode(&newData); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if len(newData.DataName) == 0 {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	mutex.Lock()
+	dataStore[newData.DataName] = newData.DataValue
+	mutex.Unlock()
+
+	// 数据上传后保存到文件
+	if err := saveDataToFile(); err != nil {
+		http.Error(w, "Failed to save data to file", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "Data uploaded successfully")
+}
+
+// 获取数据名称列表
+func dataNamesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	mutex.RLock()
+	var names []string
+	for name := range dataStore {
+		names = append(names, name)
+	}
+	mutex.RUnlock()
+
+	json.NewEncoder(w).Encode(names)
+}
+
+// 根据名称获取数据
+func dataHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "Missing 'name' parameter", http.StatusBadRequest)
+		return
+	}
+
+	mutex.RLock()
+	value, exists := dataStore[name]
+	mutex.RUnlock()
+
+	if !exists {
+		http.Error(w, "Data not found", http.StatusNotFound)
+		return
+	}
+
+	fmt.Fprintln(w, value)
+}
+
+// 删除指定名称的数据
+func deleteDataHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "Missing 'name' parameter", http.StatusBadRequest)
+		return
+	}
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	// 如果数据不存在
+	if _, exists := dataStore[name]; !exists {
+		http.Error(w, "Data not found", http.StatusNotFound)
+		return
+	}
+
+	// 删除数据
+	delete(dataStore, name)
+
+	// 数据删除后保存到文件
+	if err := saveDataToFile(); err != nil {
+		http.Error(w, "Failed to save data to file", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Data with name '%s' deleted successfully", name)
+}
+
+func main() {
+	// 加载数据
+	if err := loadDataFromFile(); err != nil {
+		fmt.Printf("Failed to load data from file: %v\n", err)
+	}
+
+	http.HandleFunc("/upload", uploadHandler)
+	http.HandleFunc("/datanames", dataNamesHandler)
+	http.HandleFunc("/data", dataHandler)
+	http.HandleFunc("/delete", deleteDataHandler)
+
+	fmt.Println("Server is running on :9080")
+	if err := http.ListenAndServe(":9080", nil); err != nil {
+		fmt.Printf("Server failed: %v\n", err)
+	}
+}
