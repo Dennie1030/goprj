@@ -1,0 +1,36 @@
+# 忽略 Go 的编译输出
+*.exe
+*.out
+*.a
+*.o
+*.so
+*.dll
+
+# 忽略目录
+/bin/
+/pkg/
+/vendor/ # 仅当不使用vendoring时
+
+# 临时文件和目录
+*.log
+*.tmp
+*.temp
+*.swp
+.DS_Store
+
+# 忽略 IDE 和编辑器相关的文件
+.idea/
+.vscode/
+*.iml
+
+# 覆盖特定操作系统产生的文件
+Thumbs.db
+*.DS_Store
+
+# 忽略go mod下载的 module 缓存文件，常基于个人选择性忽略
+# 如果不想提交 go module cache, 有时候会选择忽略以下行：
+# /go.sum
+
+# 秘密或敏感信息文件（如需要）
+.env
+
